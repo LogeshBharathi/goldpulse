@@ -1,9 +1,10 @@
 """Estimate the next Tamil Nadu board with every model and record the champion.
 
 ``--kind evening`` is the 22:00 IST run and targets the next calendar day.
-``--kind final`` is the 05:45 IST run and targets today's board. The same
-(target date, kind, model) is overwritten, never duplicated, and an actual that
-was already scored is kept.
+``--kind final`` is the 05:45 IST run and targets today's board. A final row is
+written only at 05:00-06:30 IST and an evening row only at 21:00-23:59 IST,
+unless ``--force`` is passed. The same (target date, kind, model) is
+overwritten, never duplicated, and an actual that was already scored is kept.
 """
 from __future__ import annotations
 
@@ -12,13 +13,25 @@ import sys
 from datetime import datetime, timedelta, date
 
 from src.config import load_config, repo_path
-from src.market import IST, ensure_hourly, level, move_between, reference_time_on
+from src.market import IST, ensure_hourly, last_price, move_between, reference_time_on
 from src.models import (beta_estimate, choose_champion, fit_beta, fit_premium,
                         premium_estimate, range_around, units_from_1g)
 from src.storage import read_csv, read_json, upsert_csv, write_json
 
 FORECAST_FIELDS = ["target_date", "kind", "made_at_ist", "model", "estimate", "lo", "hi", "actual", "error"]
 MODELS = ("beta", "premium")
+
+
+# Inclusive minute-of-day windows. GitHub's cron can start late and still land inside.
+FORECAST_WINDOWS = {"final": (5 * 60, 6 * 60 + 30), "evening": (21 * 60, 23 * 60 + 59)}
+
+
+def forecast_allowed(kind: str, now: datetime) -> bool:
+    """Final forecasts write at 05:00-06:30 IST, evening forecasts at 21:00-23:59 IST."""
+    start, end = FORECAST_WINDOWS[kind]
+    local = now.astimezone(IST)
+    minute = local.hour * 60 + local.minute
+    return start <= minute <= end
 
 
 def target_date(now: datetime, kind: str) -> date:
@@ -37,11 +50,13 @@ def board_history(cfg: dict) -> list[tuple[date, float]]:
 
 
 def change_pairs(history: list[tuple[date, float]], points, cfg: dict) -> list[tuple[float, float]]:
-    """(board change, international change) between consecutive saved boards, using 09:00 IST."""
+    """(board change, international change) between consecutive saved boards, using 09:00 IST.
+
+    A zero international change is kept. Sunday is zero when nothing has printed
+    since Saturday's reference, and the beta fit ignores those rows.
+    """
     pairs = []
     for (d0, r0), (d1, r1) in zip(history, history[1:]):
-        if d1.weekday() == 6 and cfg["weekend"].get("sunday_repeats_saturday"):
-            continue
         move = move_between(points, reference_time_on(d0, cfg), reference_time_on(d1, cfg), cfg,
                             reference_time_on(d1, cfg))
         if move is None or r0 == 0:
@@ -53,9 +68,9 @@ def change_pairs(history: list[tuple[date, float]], points, cfg: dict) -> list[t
 def premiums_at_open(history, points, cfg) -> list[float]:
     out = []
     for day, rate in history:
-        intl = level(points, reference_time_on(day, cfg), cfg)
-        if intl:
-            out.append(rate / intl - 1)
+        intl = last_price(points, reference_time_on(day, cfg))
+        if intl and intl[1]:
+            out.append(rate / intl[1] - 1)
     return out
 
 
@@ -92,9 +107,10 @@ def build(cfg: dict, now: datetime, kind: str, points) -> list[dict]:
     move = move_between(points, start, now, cfg, now)
     if move is None:
         raise RuntimeError("international prices are missing for the move since 09:00 IST")
-    latest = level(points, now, cfg)
-    if latest is None:
+    latest_bar = last_price(points, now)
+    if latest_bar is None:
         raise RuntimeError("no recent international price")
+    latest = latest_bar[1]
 
     beta = fit_beta(change_pairs(history, points, cfg), cfg["ridge"]["lambda"],
                     cfg["ridge"]["prior"], cfg["ridge"]["window_days"])
@@ -123,9 +139,16 @@ def build(cfg: dict, now: datetime, kind: str, points) -> list[dict]:
     return rows
 
 
-def run(kind: str, cfg: dict | None = None, now: datetime | None = None, points=None) -> list[dict]:
+def run(kind: str, cfg: dict | None = None, now: datetime | None = None, points=None, force: bool = False) -> list[dict]:
     cfg = cfg or load_config()
     now = now or datetime.now(IST)
+    if not force and not forecast_allowed(kind, now):
+        local = now.astimezone(IST)
+        raise RuntimeError(
+            f"refusing to write a {kind} forecast at {local.strftime('%H:%M')} IST. "
+            "final is written only at 05:00-06:30 IST and evening only at 21:00-23:59 IST. "
+            "Pass --force to write outside that window."
+        )
     points = points if points is not None else ensure_hourly(cfg)
     rows = build(cfg, now, kind, points)
     upsert_csv(repo_path(cfg, "forecasts"), rows, key=["target_date", "kind", "model"], fieldnames=FORECAST_FIELDS)
@@ -137,9 +160,11 @@ def run(kind: str, cfg: dict | None = None, now: datetime | None = None, points=
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forecast the next Tamil Nadu board")
     parser.add_argument("--kind", required=True, choices=["evening", "final"])
+    parser.add_argument("--force", action="store_true",
+                        help="Write even outside the 05:00-06:30 or 21:00-23:59 IST window")
     args = parser.parse_args(argv)
     try:
-        run(args.kind)
+        run(args.kind, force=args.force)
     except Exception as exc:  # noqa: BLE001
         print(f"forecast failed: {exc}", file=sys.stderr)
         return 1

@@ -50,10 +50,9 @@ scoring:
   min_std_samples: 5
 
 weekend:
-  # Saturday and Sunday. COMEX is shut, so a forecast made then does not invent a new move.
-  closed_weekdays: [5, 6]
-  treat_move_as_zero: true
-  sunday_repeats_saturday: true
+  # COMEX trades into early Saturday IST. The move uses the last price at or
+  # before the forecast, so Friday's session still reaches Saturday's board.
+  # Sunday repeats Saturday only when nothing has printed since that reference.
   holidays: []
 
 paths:

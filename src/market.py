@@ -1,8 +1,9 @@
 """International gold in rupees per gram, from COMEX GC=F and USDINR.
 
 Price = USD per troy ounce / 31.1034768 x rupees per dollar. Hourly bars are
-aligned on the IST hour. COMEX is shut on weekends and configured holidays, and
-a forecast made then keeps a move of 0 rather than inventing one.
+aligned on the IST hour. The move is the last price at or before the forecast
+divided by the 09:00 IST reference of the board day, minus 1. It is zero only
+when no bar is newer than that reference, which is how Sunday repeats Saturday.
 """
 from __future__ import annotations
 
@@ -27,14 +28,38 @@ def is_closed(when: datetime, cfg: dict) -> bool:
     holidays = set(cfg["weekend"].get("holidays") or [])
     if local.date().isoformat() in holidays:
         return True
-    return local.weekday() in cfg["weekend"]["closed_weekdays"]
+    return local.weekday() in (cfg["weekend"].get("closed_weekdays") or [])
 
 
 def effective_move(move: float, when: datetime, cfg: dict) -> float:
-    """No new international move is applied while gold is closed."""
-    if cfg["weekend"].get("treat_move_as_zero", True) and is_closed(when, cfg):
-        return 0.0
+    """Return the move. A closed session is handled by ``move_since_reference``."""
+    del when, cfg
     return move
+
+
+def last_price(points: list[tuple[datetime, float]], when: datetime) -> tuple[datetime, float] | None:
+    """Last bar at or before ``when``. ``points`` are oldest first. No gap limit."""
+    best = None
+    for ts, value in points:
+        if ts > when:
+            break
+        best = (ts, value)
+    return best
+
+
+def move_since_reference(points: list[tuple[datetime, float]], reference: datetime, asof: datetime) -> float | None:
+    """(last price at or before ``asof``) / (last price at or before ``reference``) - 1.
+
+    Zero when the market has not printed since the reference bar. None when
+    there is no price at or before the reference.
+    """
+    ref = last_price(points, reference)
+    if ref is None or ref[1] == 0:
+        return None
+    end = last_price(points, asof)
+    if end is None or end[0] <= ref[0]:
+        return 0.0
+    return end[1] / ref[1] - 1
 
 
 def reference_time_on(day, cfg: dict) -> datetime:
@@ -148,8 +173,10 @@ def level(points: list[tuple[datetime, float]], when: datetime, cfg: dict) -> fl
 
 
 def move_between(points, start: datetime, end: datetime, cfg: dict, asof: datetime) -> float | None:
-    """Fractional change from ``start`` to ``end``. Zero when ``asof`` is a closed session."""
-    a, b = level(points, start, cfg), level(points, end, cfg)
-    if a is None or b is None or a == 0:
-        return None
-    return effective_move(b / a - 1, asof, cfg)
+    """Fractional change from the ``start`` reference to the last price at or before ``asof``.
+
+    ``end`` is accepted for older callers and is not used: the price is the last
+    bar at or before the forecast time, even when that bar is hours earlier.
+    """
+    del end, cfg
+    return move_since_reference(points, start, asof)

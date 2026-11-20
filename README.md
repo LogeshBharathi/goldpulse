@@ -23,7 +23,7 @@ Optional, for failure messages: set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
 Each workflow can also be started by hand. They share one concurrency group, install Python 3.12, and commit as `github-actions[bot]` only when files changed. A second run of the same job overwrites the same forecast row instead of adding another. `git pull --rebase` runs before the push. A failure calls `src/notify.py`.
 
-The evening run targets the next calendar day. The final run, made before 09:00, targets today's board. On Saturday and Sunday the international move is treated as zero, because COMEX is shut. A Sunday board repeats Saturday when `weekend.sunday_repeats_saturday` is true.
+The evening run targets the next calendar day. The final run, made before 09:00, targets today's board. The international move is the last traded price at or before the forecast, divided by the 09:00 IST price of the last board day, minus 1. It is zero only when the market has not printed since that reference. Friday's session therefore still reaches Saturday's board, and Sunday repeats Saturday because nothing trades in between. Monday's reopen counts once it has printed.
 
 ## Add a board rate by hand
 

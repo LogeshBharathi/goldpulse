@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from src.config import load_config
-from src.market import effective_move
+from src.market import move_since_reference
 from src.scrape_board import collect, parse_bankbazaar, parse_goodreturns, save_board, select_rate
 from src.storage import read_csv
 
@@ -64,9 +64,21 @@ def test_manual_file_is_saved_when_both_sites_fail(tmp_path):
     assert saved[-1]["rate_22k_1g"] == "11520.00"
 
 
-def test_weekend_move_is_zero_and_friday_move_is_kept():
-    cfg = load_config()
-    saturday = datetime(2026, 11, 21, 5, 45, tzinfo=IST)
-    friday = datetime(2026, 11, 20, 22, 0, tzinfo=IST)
-    assert effective_move(0.02, saturday, cfg) == 0
-    assert effective_move(-0.014, friday, cfg) == -0.014
+def test_friday_reaches_saturday_sunday_is_flat_and_monday_reopens():
+    points = [
+        (datetime(2026, 11, 13, 9, 0, tzinfo=IST), 100.0),   # Friday reference
+        (datetime(2026, 11, 13, 22, 0, tzinfo=IST), 110.0),  # Friday evening
+        (datetime(2026, 11, 14, 2, 0, tzinfo=IST), 120.0),   # early Saturday close
+        (datetime(2026, 11, 16, 5, 0, tzinfo=IST), 90.0),    # Monday reopen
+    ]
+    friday = datetime(2026, 11, 13, 9, 0, tzinfo=IST)
+    friday_evening = move_since_reference(points, friday, datetime(2026, 11, 13, 22, 0, tzinfo=IST))
+    saturday = move_since_reference(points, friday, datetime(2026, 11, 14, 5, 45, tzinfo=IST))
+    sunday = move_since_reference(
+        points, datetime(2026, 11, 14, 9, 0, tzinfo=IST), datetime(2026, 11, 15, 5, 45, tzinfo=IST))
+    monday = move_since_reference(
+        points, datetime(2026, 11, 15, 9, 0, tzinfo=IST), datetime(2026, 11, 16, 5, 45, tzinfo=IST))
+    assert friday_evening == pytest.approx(0.10)
+    assert saturday == pytest.approx(0.20)
+    assert sunday == 0
+    assert monday == pytest.approx(90 / 120 - 1)

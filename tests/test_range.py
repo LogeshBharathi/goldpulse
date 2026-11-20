@@ -27,5 +27,13 @@ def test_range_uses_only_the_configured_window():
     old = [1000] * 5
     recent = [10] * window
     lo, hi = range_around(10000, old + recent, cfg, recent_moves=[0.001], baseline_moves=[0.001])
-    # The huge old errors are outside the window, so the half-width stays near the minimum.
-    assert hi - lo < 500
+    # The huge old errors are outside the window, so they do not set the width.
+    assert hi - lo == 20
+
+
+def test_scored_errors_are_not_lifted_to_the_minimum_width():
+    cfg = load_config()["range"]
+    lo, hi = range_around(10000, [30], cfg, recent_moves=[0.001], baseline_moves=[0.001])
+    # One miss: the finite-sample rank is past the sample, so the width is twice that miss.
+    assert hi - lo == 60
+    assert hi - lo < cfg["min_width_inr"]

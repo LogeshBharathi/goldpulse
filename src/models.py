@@ -8,8 +8,8 @@ model has the lower mean absolute error over the last scored window. Until both
 models have a full window, the beta model is the champion.
 
 The range is split-conformal: the finite-sample 80% quantile of past absolute
-errors, widened when recent overnight moves have been larger than usual, and
-never narrower than the configured minimum.
+errors, widened when recent overnight moves have been larger than usual.
+The configured minimum width is used only when there are no scored errors yet.
 """
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def volatility_ratio(recent: list[float], baseline: list[float], low: float, hig
 
 def range_around(estimate: float, abs_errors: list[float], cfg_range: dict,
                  recent_moves: list[float] | None = None, baseline_moves: list[float] | None = None) -> tuple[float, float]:
-    """Full interval. Width is at least ``min_width_inr`` and scales with recent volatility."""
+    """Full interval. Scored errors set the width. The minimum applies only when none exist."""
     recent_n = cfg_range["volatility_recent_days"]
     base_n = cfg_range["volatility_baseline_days"]
     moves = [abs(m) for m in (baseline_moves or [])]
@@ -120,8 +120,11 @@ def range_around(estimate: float, abs_errors: list[float], cfg_range: dict,
         ratio = volatility_ratio([abs(m) for m in recent_moves], [abs(m) for m in (baseline_moves or recent_moves)],
                                  cfg_range["volatility_ratio_min"], cfg_range["volatility_ratio_max"])
     q = conformal_quantile(abs_errors[-cfg_range["window_days"]:], cfg_range["coverage"])
-    half = (q if q is not None else cfg_range["min_width_inr"] / 2) * ratio
-    half = max(half, cfg_range["min_width_inr"] / 2)
+    if q is None:
+        half = cfg_range["min_width_inr"] / 2
+    else:
+        # Scored misses set the width. The floor applies only when there are none.
+        half = q * ratio
     return estimate - half, estimate + half
 
 

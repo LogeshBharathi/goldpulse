@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="GoldPulse mark">
+  <rect width="64" height="64" rx="16" fill="#E4C36A"/>
+  <path d="M8 42h8l6-14 7 18 8-22 6 8h13" fill="none" stroke="#1A1608" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43 18v16" stroke="#1A1608" stroke-width="2" stroke-linecap="round"/>
+  <rect x="40.5" y="22" width="5" height="8" rx="1" fill="#1A1608"/>
+</svg>

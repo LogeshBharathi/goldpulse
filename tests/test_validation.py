@@ -5,7 +5,8 @@ import pytest
 
 from src.config import load_config
 from src.market import effective_move
-from src.scrape_board import parse_bankbazaar, parse_goodreturns, select_rate
+from src.scrape_board import collect, parse_bankbazaar, parse_goodreturns, save_board, select_rate
+from src.storage import read_csv
 
 IST = ZoneInfo("Asia/Kolkata")
 BANK = """
@@ -37,6 +38,30 @@ def test_jump_is_rejected_and_disagreement_is_flagged():
         [("bankbazaar", 11510), ("goodreturns", 11300)], previous=11500, cfg=cfg)
     assert (source, rate) == ("bankbazaar", 11510)
     assert flags and "differ" in flags[0]
+
+
+def test_manual_file_is_saved_when_both_sites_fail(tmp_path):
+    cfg = load_config()
+    cfg["_root"] = str(tmp_path)
+    cfg["paths"] = {**cfg["paths"], "board": "board.csv"}
+    cfg["sources"] = {**cfg["sources"], "manual_file": "manual_board.json"}
+    (tmp_path / "board.csv").write_text(
+        "date,source,rate_22k_1g,scraped_at_ist\n"
+        "2026-11-20,legacy,11510.00,2026-11-20T10:24:41+05:30\n"
+    )
+    (tmp_path / "manual_board.json").write_text('{"2026-11-21": 11520}\n')
+    day = datetime(2026, 11, 21).date()
+
+    def fetch(_url):
+        return 503, "<html>unavailable</html>"
+
+    source, rate, _flags = collect(cfg, day, fetch=fetch)
+    assert (source, rate) == ("manual", 11520.0)
+    save_board(cfg, day.isoformat(), source, rate, datetime(2026, 11, 21, 10, 30, tzinfo=IST))
+    saved = read_csv(tmp_path / "board.csv")
+    assert saved[-1]["date"] == "2026-11-21"
+    assert saved[-1]["source"] == "manual"
+    assert saved[-1]["rate_22k_1g"] == "11520.00"
 
 
 def test_weekend_move_is_zero_and_friday_move_is_kept():

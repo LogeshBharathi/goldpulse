@@ -221,3 +221,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local secrets, databases, and the hourly price cache
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+node_modules/
+credentials.json
+data/intl_hourly.csv

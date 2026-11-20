@@ -1,8 +1,34 @@
 {
-  "accuracy": null,
-  "champion": null,
-  "today": null,
-  "tomorrow": {"evening": null, "final": null},
-  "updated_at_ist": null,
+  "accuracy": {
+    "direction_accuracy": null,
+    "mae_30": null,
+    "range_hit_rate": null,
+    "scored_days": 0
+  },
+  "champion": "beta",
+  "today": {
+    "date": "2026-11-20",
+    "g1": 11510,
+    "g10": 115100,
+    "g100": 1151000,
+    "pavun": 92080,
+    "source": "legacy"
+  },
+  "tomorrow": {
+    "evening": null,
+    "final": {
+      "date": "2026-11-21",
+      "estimate": 11510,
+      "g10": 115100,
+      "g100": 1151000,
+      "hi": 11550,
+      "kind": "final",
+      "lo": 11470,
+      "made_at_ist": "2026-11-21T00:01:15+05:30",
+      "model": "beta",
+      "pavun": 92080
+    }
+  },
+  "updated_at_ist": "2026-11-21T00:01:15+05:30",
   "yesterday_check": null
 }

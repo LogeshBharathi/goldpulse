@@ -13,6 +13,9 @@ concurrency:
 jobs:
   actual:
     runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +23,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m src.scrape_board --if-missing
+      - name: Save today's board from the websites, or from data/manual_board.json
+        run: python -m src.scrape_board --if-missing
       - run: python -m src.score_and_learn
       - run: python -m src.build_site
       - name: Commit the board and the score

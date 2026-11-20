@@ -138,20 +138,34 @@ def select_rate(candidates: list[tuple[str, float | None]], previous: float | No
     return valid[0][0], valid[0][1], flags
 
 
-def _get(url: str, cfg: dict) -> str:
+def _get(url: str, cfg: dict) -> tuple[int | None, str]:
+    """Return (HTTP status, body). Status is None when the connection itself failed."""
     headers = {"User-Agent": cfg["sources"]["user_agent"], "Accept": "text/html"}
     delay = cfg["sources"]["backoff_seconds"]
-    last = None
+    last: Exception | None = None
+    last_status: int | None = None
+    last_body = ""
     for attempt in range(cfg["sources"]["retries"]):
         try:
             response = requests.get(url, headers=headers, timeout=cfg["sources"]["timeout_seconds"])
+            body = response.content.decode("utf-8", "replace")
             if response.status_code >= 400:
-                raise RuntimeError(f"HTTP {response.status_code} from {url}")
-            return response.content.decode("utf-8", "replace")
+                last = RuntimeError(f"HTTP {response.status_code}")
+                last_status, last_body = response.status_code, body
+            else:
+                return response.status_code, body
         except Exception as exc:  # noqa: BLE001
             last = exc
-            time.sleep(delay * (2 ** attempt))
-    raise RuntimeError(f"could not fetch {url}: {last}")
+            last_status, last_body = None, ""
+        time.sleep(delay * (2 ** attempt))
+    detail = f"{last}; body: {last_body[:200]!r}"
+    raise RuntimeError(detail) from last
+
+
+def _log_source_failure(source: str, url: str, status, body: str) -> None:
+    snippet = " ".join((body or "").split())[:200]
+    _log(f"FAILED {source}: HTTP {status if status is not None else 'no response'} {url}")
+    _log(f"FAILED {source} body: {snippet}")
 
 
 def previous_board(cfg: dict) -> tuple[str | None, float | None]:
@@ -173,21 +187,37 @@ def save_board(cfg: dict, day: str, source: str, rate: float, when: datetime) ->
     }], key=["date"], fieldnames=BOARD_FIELDS)
 
 
+def _read_source(source: str, url: str, parser, day, cfg: dict, fetch) -> float | None:
+    try:
+        fetched = fetch(url) if fetch else _get(url, cfg)
+        if isinstance(fetched, tuple):
+            status, html = fetched
+        else:
+            status, html = 200, fetched
+    except Exception as exc:  # noqa: BLE001
+        _log_source_failure(source, url, None, str(exc))
+        return None
+    if status is None or status >= 400:
+        _log_source_failure(source, url, status, html)
+        return None
+    rate = parser(html, day)
+    if rate is None:
+        _log_source_failure(source, url, status, html)
+    return rate
+
+
 def collect(cfg: dict, day, fetch=None) -> tuple[str, float, list[str]]:
-    """``fetch(url)`` returns HTML. The manual file is read locally."""
-    fetch = fetch or (lambda url: _get(url, cfg))
+    """``fetch(url)`` returns HTML, or (status, HTML). The manual file is read locally."""
     _prev_date, previous = previous_board(cfg)
     manual = read_json(Path_manual(cfg), {})
     manual_rate = manual.get(day.isoformat())
-    bank = good = None
-    try:
-        bank = parse_bankbazaar(fetch(cfg["sources"]["bankbazaar_url"]), day)
-    except Exception as exc:  # noqa: BLE001
-        _log(f"bankbazaar unavailable: {exc}")
-    try:
-        good = parse_goodreturns(fetch(cfg["sources"]["goodreturns_url"]), day)
-    except Exception as exc:  # noqa: BLE001
-        _log(f"goodreturns unavailable: {exc}")
+    bank_url = cfg["sources"]["bankbazaar_url"]
+    good_url = cfg["sources"]["goodreturns_url"]
+    bank = _read_source("BankBazaar", bank_url, parse_bankbazaar, day, cfg, fetch)
+    good = _read_source("GoodReturns", good_url, parse_goodreturns, day, cfg, fetch)
+    if bank is None and good is None:
+        _log("FAILED: BankBazaar and GoodReturns both failed. No website rate will be saved. "
+             "See the two FAILED lines above for the HTTP status and the start of each response.")
     candidates = [("bankbazaar", bank), ("goodreturns", good),
                   ("manual", float(manual_rate) if manual_rate not in (None, "") else None)]
     return select_rate(candidates, previous, cfg)

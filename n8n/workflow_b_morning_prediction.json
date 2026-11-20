@@ -1,0 +1,900 @@
+{
+  "name": "GoldPulse B - Morning prediction",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "376a6003-61db-5000-87ef-211a3845c80f",
+      "name": "Trigger 08:30 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8000/api/v1/calendar/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b612e654-cdc5-51f9-b9ad-613133b8bd6a",
+      "name": "Calendar status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "td",
+              "leftValue": "={{ $json.india_trading_day }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "2f3e1054-ca5e-5c89-a7ac-537712b6cc58",
+      "name": "Indian trading day?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'INFO', event: 'holiday_skip', message: 'No prediction: not an Indian trading day (' + $json.date + ')', payload: $json}) }}"
+      },
+      "id": "9596d14b-abbf-590f-b11d-78e3fa08e481",
+      "name": "Log holiday skip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\"COMEX_GC\", \"XAUUSD\", \"USDINR\", \"MCX_GOLD\"].map(i => ({json: {instrument: i}}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "098711ae-6d0b-5d42-bab0-4475bb727340",
+      "name": "Instruments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api:8000/api/v1/market/fetch/{{ $json.instrument }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "c003a3f5-9660-5bd7-9d0f-5eea1159e7ba",
+      "name": "Fetch latest price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Freshness + sanity validation for the quotes fetched in this run. Never repairs data.\nconst maxAgeH = {COMEX_GC: 3, XAUUSD: 3, USDINR: 6, MCX_GOLD: 36};\nconst need = [\"COMEX_GC\", \"XAUUSD\", \"USDINR\", \"MCX_GOLD\"];\nconst now = Date.now();\nconst items = $input.all().map(i => i.json);\nconst problems = [], quotes = [];\nfor (const inst of need) {\n  const q = items.find(x => x.instrument === inst);\n  if (!q) { problems.push(inst + ': missing (fetch failed after retries)'); continue; }\n  if (!(Number(q.price) > 0)) { problems.push(inst + ': invalid price'); continue; }\n  const t = Date.parse(q.as_of);\n  if (isNaN(t)) { problems.push(inst + ': unparseable timestamp'); continue; }\n  const ageH = (now - t) / 3.6e6;\n  if (ageH < -0.05) { problems.push(inst + ': timestamp in the future'); continue; }\n  if (ageH > maxAgeH[inst]) { problems.push(inst + ': stale (' + ageH.toFixed(1) + 'h old)'); continue; }\n  quotes.push(q);\n}\nconst slotDate = new Date(now + 5.5 * 3.6e6).toISOString().slice(0, 10); // IST calendar date\nreturn [{json: {ok: problems.length === 0, problems, quotes, slot_date: slotDate}}];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "5c45b1f4-ac72-5dc6-a44d-7f01cd1d25f6",
+      "name": "Validate data freshness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "362ec667-11ba-50cc-adea-3dc000e24e1c",
+      "name": "Data fresh?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// One item per quote, normalised for POST /market/snapshot. `as_of` is UTC ISO-8601 from the API.\nconst d = $input.first().json;\nconst SLOTTED = [\"COMEX_GC\", \"XAUUSD\", \"USDINR\"];\nreturn d.quotes.map(q => ({json: {\n  instrument: q.instrument, price: q.price, currency: q.currency, provider: q.provider, as_of: q.as_of,\n  market_id: q.market_id, is_delayed: q.is_delayed, delay_minutes: q.delay_minutes,\n  slot: SLOTTED.includes(q.instrument) ? 'MORNING' : null, slot_date: SLOTTED.includes(q.instrument) ? d.slot_date : null}}));\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "ce16d713-81dd-5709-97a7-04cb4c877b9b",
+      "name": "Normalize quotes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/market/snapshot",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "165917d1-9d22-53e6-ba72-ee892284faac",
+      "name": "Save morning snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Collapse N per-quote items to one so downstream nodes run exactly once.\nconst n = $input.all().length;\nreturn [{json: {persisted: n, expected: 3, complete: n >= 3}}];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "63e07806-c3d3-5059-b96f-561eadadcadc",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/predictions/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "e451439e-b1ae-52c4-a8a0-3cecd18bb6a5",
+      "name": "Generate prediction (Python API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c",
+              "leftValue": "={{ $json.created }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "6b4d4481-def2-5389-9f97-ad5533706e63",
+      "name": "New prediction?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst p = $input.first().json;\nconst h = ['Date','Previous MCX Price','COMEX Change','USD/INR Change','Predicted Direction','Predicted Price','Actual Price','Prediction Error','Accuracy Status'];\nconst o = {}; h.forEach((k, i) => o[k] = p.sheet_row[i]);\nreturn [{json: Object.assign({}, o, {telegram_text: p.telegram_text})}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "0d32c52b-bd42-5f3d-b0e5-359133e95465",
+      "name": "Build sheet row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Daily Predictions"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "7221a09f-e673-5f01-b50d-19c26532b15f",
+      "name": "Append to Daily Predictions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3900,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json: {text: $('Build sheet row').first().json.telegram_text}}];"
+      },
+      "id": "c8421213-f28a-5ca7-831b-8277170e8407",
+      "name": "Rebuild message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "1065b545-6633-5f63-bc5a-cafc2fbe2053",
+      "name": "Telegram forecast",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4420,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'INFO', event: 'published', message: 'forecast published', payload: $json}) }}"
+      },
+      "id": "fa1e990a-f5f6-58f6-8043-ad7011f41e3b",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'INFO', event: 'duplicate_skipped', message: 'prediction already existed; Sheets/Telegram skipped', payload: $json}) }}"
+      },
+      "id": "88b3b24a-c7b2-5f12-a929-73dcff214272",
+      "name": "Log duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4940,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'WARNING', event: 'blocked', message: 'No forecast: ' + $json.problems.join('; '), payload: $json}) }}"
+      },
+      "id": "14d5fae1-1f33-5915-be30-cf5f064a305e",
+      "name": "Log blocked (stale/incomplete)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'ERROR', event: 'fetch_failed', message: 'fetch failed: ' + ($json.error?.message || JSON.stringify($json.error || $json)), payload: $json}) }}"
+      },
+      "id": "7c191d37-f27b-5214-bf2d-86664ab80eb6",
+      "name": "Log fetch failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5460,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'ERROR', event: 'generate_failed', message: 'API refused/failed: ' + JSON.stringify($json.error || $json), payload: $json}) }}"
+      },
+      "id": "276eb3c1-5693-595f-a007-b39e89cdbbd2",
+      "name": "Log generation failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_WITH_TELEGRAM_CHAT_ID",
+        "text": "GOLDPULSE INDIA: no forecast published today (data stale/incomplete or API error). No prediction was generated from partial data. See automation_logs.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "de0e1417-adf0-561d-9761-3a4103bfee69",
+      "name": "Telegram: no forecast today",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        5980,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'morning_prediction', level: 'ERROR', event: 'calendar_failed', message: 'calendar status call failed: ' + JSON.stringify($json.error || $json), payload: $json}) }}"
+      },
+      "id": "f9a1510d-1348-5e95-a101-adc694994171",
+      "name": "Log calendar failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6240,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Trigger 08:30 IST": {
+      "main": [
+        [
+          {
+            "node": "Calendar status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar status": {
+      "main": [
+        [
+          {
+            "node": "Indian trading day?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log calendar failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log calendar failure": {
+      "main": [
+        [
+          {
+            "node": "Telegram: no forecast today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Indian trading day?": {
+      "main": [
+        [
+          {
+            "node": "Instruments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log holiday skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instruments": {
+      "main": [
+        [
+          {
+            "node": "Fetch latest price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch latest price": {
+      "main": [
+        [
+          {
+            "node": "Validate data freshness",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate data freshness": {
+      "main": [
+        [
+          {
+            "node": "Data fresh?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data fresh?": {
+      "main": [
+        [
+          {
+            "node": "Normalize quotes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log blocked (stale/incomplete)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log blocked (stale/incomplete)": {
+      "main": [
+        [
+          {
+            "node": "Telegram: no forecast today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize quotes": {
+      "main": [
+        [
+          {
+            "node": "Save morning snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save morning snapshot": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Generate prediction (Python API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate prediction (Python API)": {
+      "main": [
+        [
+          {
+            "node": "New prediction?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log generation failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log generation failure": {
+      "main": [
+        [
+          {
+            "node": "Telegram: no forecast today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New prediction?": {
+      "main": [
+        [
+          {
+            "node": "Build sheet row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build sheet row": {
+      "main": [
+        [
+          {
+            "node": "Append to Daily Predictions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Daily Predictions": {
+      "main": [
+        [
+          {
+            "node": "Rebuild message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild message": {
+      "main": [
+        [
+          {
+            "node": "Telegram forecast",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram forecast": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "year": 2026,
+  "verified": false,
+  "note": "TEMPLATE. Contains only fixed national holidays that fall on weekdays and MUST be replaced/extended from the official MCX holiday circular. Movable festival holidays (Holi, Diwali, Eid, etc.) are intentionally NOT guessed. MCX sometimes closes only the morning session; this file models full-day closures only.",
+  "holidays": [
+    {"date": "2026-01-26", "name": "Republic Day"},
+    {"date": "2026-10-02", "name": "Gandhi Jayanti"},
+    {"date": "2026-12-25", "name": "Christmas"}
+  ]
+}

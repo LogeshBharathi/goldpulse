@@ -1,0 +1,472 @@
+{
+  "name": "GoldPulse A - Overnight market collection",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "79765c91-80b7-564e-9a51-c02d6e2823ed",
+      "name": "Trigger 23:30 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8000/api/v1/calendar/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9b358043-c50f-508d-af33-ba8e52c7062c",
+      "name": "Calendar status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\"COMEX_GC\", \"XAUUSD\", \"USDINR\", \"MCX_GOLD\"].map(i => ({json: {instrument: i}}));",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "b1d21034-e504-526e-a2e0-ae54b1eacbf7",
+      "name": "Instruments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://api:8000/api/v1/market/fetch/{{ $json.instrument }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a2d91541-fa3a-5e60-8e00-b4024aea5a62",
+      "name": "Fetch quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Freshness + sanity validation for the quotes fetched in this run. Never repairs data.\nconst maxAgeH = {COMEX_GC: 3, XAUUSD: 3, USDINR: 6, MCX_GOLD: 36};\nconst need = [\"COMEX_GC\", \"XAUUSD\", \"USDINR\"];\nconst now = Date.now();\nconst items = $input.all().map(i => i.json);\nconst problems = [], quotes = [];\nfor (const inst of need) {\n  const q = items.find(x => x.instrument === inst);\n  if (!q) { problems.push(inst + ': missing (fetch failed after retries)'); continue; }\n  if (!(Number(q.price) > 0)) { problems.push(inst + ': invalid price'); continue; }\n  const t = Date.parse(q.as_of);\n  if (isNaN(t)) { problems.push(inst + ': unparseable timestamp'); continue; }\n  const ageH = (now - t) / 3.6e6;\n  if (ageH < -0.05) { problems.push(inst + ': timestamp in the future'); continue; }\n  if (ageH > maxAgeH[inst]) { problems.push(inst + ': stale (' + ageH.toFixed(1) + 'h old)'); continue; }\n  quotes.push(q);\n}\nconst slotDate = new Date(now + 5.5 * 3.6e6).toISOString().slice(0, 10); // IST calendar date\nreturn [{json: {ok: problems.length === 0, problems, quotes, slot_date: slotDate}}];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "7f5a61a1-3f73-56c3-bf98-562f7c175f63",
+      "name": "Validate quotes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "3edad438-995e-5122-a616-77fe426c91ca",
+      "name": "Quotes valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// One item per quote, normalised for POST /market/snapshot. `as_of` is UTC ISO-8601 from the API.\nconst d = $input.first().json;\nconst SLOTTED = [\"COMEX_GC\", \"XAUUSD\", \"USDINR\"];\nreturn d.quotes.map(q => ({json: {\n  instrument: q.instrument, price: q.price, currency: q.currency, provider: q.provider, as_of: q.as_of,\n  market_id: q.market_id, is_delayed: q.is_delayed, delay_minutes: q.delay_minutes,\n  slot: SLOTTED.includes(q.instrument) ? 'CLOSE' : null, slot_date: SLOTTED.includes(q.instrument) ? d.slot_date : null}}));\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "83f1ce69-9172-50d6-9085-3c3fbce9e8ff",
+      "name": "Normalize timestamps & slot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/market/snapshot",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "d7326429-b591-5b0a-a0b1-06f73155fd52",
+      "name": "Save snapshot (PostgreSQL via API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Collapse N per-quote items to one so downstream nodes run exactly once.\nconst n = $input.all().length;\nreturn [{json: {persisted: n, expected: 3, complete: n >= 3}}];\n",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "20cdc28a-d1a4-564f-be4c-e4c7041feb5f",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'overnight_collect', level: 'INFO', event: 'collected', message: 'snapshots persisted: ' + $json.persisted, payload: $json}) }}"
+      },
+      "id": "b74f3e8b-2fc0-5dd1-a6b4-ad71a47e3591",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'overnight_collect', level: 'ERROR', event: 'fetch_failed', message: 'fetch failed: ' + ($json.error?.message || JSON.stringify($json.error || $json)), payload: $json}) }}"
+      },
+      "id": "fd39d7a2-bf82-5464-9c96-c63d76af3271",
+      "name": "Log fetch failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'overnight_collect', level: 'WARNING', event: 'validation_failed', message: 'invalid/stale data: ' + $json.problems.join('; '), payload: $json}) }}"
+      },
+      "id": "6570cbba-397d-53f0-9ad4-7b51acd5b5e4",
+      "name": "Log validation failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3120,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'overnight_collect', level: 'ERROR', event: 'save_failed', message: 'snapshot rejected/failed: ' + ($json.error?.message || JSON.stringify($json.error || $json)), payload: $json}) }}"
+      },
+      "id": "307e3fb3-2601-5acf-9823-2dbab0c7fa00",
+      "name": "Log save failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3380,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Trigger 23:30 IST": {
+      "main": [
+        [
+          {
+            "node": "Calendar status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar status": {
+      "main": [
+        [
+          {
+            "node": "Instruments",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instruments": {
+      "main": [
+        [
+          {
+            "node": "Fetch quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch quote": {
+      "main": [
+        [
+          {
+            "node": "Validate quotes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate quotes": {
+      "main": [
+        [
+          {
+            "node": "Quotes valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quotes valid?": {
+      "main": [
+        [
+          {
+            "node": "Normalize timestamps & slot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log validation failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize timestamps & slot": {
+      "main": [
+        [
+          {
+            "node": "Save snapshot (PostgreSQL via API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save snapshot (PostgreSQL via API)": {
+      "main": [
+        [
+          {
+            "node": "Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log save failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

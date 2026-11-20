@@ -1,0 +1,64 @@
+timezone: Asia/Kolkata
+
+sources:
+  bankbazaar_url: https://www.bankbazaar.com/gold-rate-chennai.html
+  goodreturns_url: https://www.goodreturns.in/gold-rates/chennai.html
+  manual_file: data/manual_board.json
+  timeout_seconds: 20
+  retries: 3
+  backoff_seconds: 1.5
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+market:
+  comex_symbol: "GC=F"
+  fx_symbol: "INR=X"
+  troy_oz_grams: 31.1034768
+  reference_time: "09:00"
+  cache_file: data/intl_hourly.csv
+  max_gap_hours: 6
+  history_period: 2y
+
+ridge:
+  lambda: 1.0
+  prior: 1.0
+  window_days: 30
+
+premium:
+  half_life_days: 10
+
+champion:
+  window_days: 20
+  default_model: beta
+
+range:
+  window_days: 30
+  coverage: 0.80
+  min_width_inr: 80
+  volatility_recent_days: 10
+  volatility_baseline_days: 30
+  volatility_ratio_min: 0.5
+  volatility_ratio_max: 3.0
+
+validation:
+  max_jump_pct: 5.0
+  source_disagreement_pct: 0.5
+  min_rate: 1000
+  max_rate: 50000
+
+scoring:
+  outlier_std_multiple: 4.0
+  min_std_samples: 5
+
+weekend:
+  # Saturday and Sunday. COMEX is shut, so a forecast made then does not invent a new move.
+  closed_weekdays: [5, 6]
+  treat_move_as_zero: true
+  sunday_repeats_saturday: true
+  holidays: []
+
+paths:
+  board: data/board.csv
+  forecasts: data/forecasts.csv
+  params: data/params.json
+  latest: docs/latest.json
+  history: docs/history.json

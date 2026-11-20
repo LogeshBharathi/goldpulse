@@ -1,0 +1,736 @@
+{
+  "name": "GoldPulse C - Accuracy evaluation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "59 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "59cc9f9b-370c-5ae1-adfc-4961ce80e579",
+      "name": "Trigger 23:59 IST (after MCX close)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8000/api/v1/calendar/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "2846260e-3b05-5142-9e3a-a63d88c3223d",
+      "name": "Calendar status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "td",
+              "leftValue": "={{ $json.india_trading_day }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "4859272c-650d-5923-8f6a-fe772c60280f",
+      "name": "Indian trading day?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'INFO', event: 'holiday_skip', message: 'Not an Indian trading day; nothing to evaluate', payload: $json}) }}"
+      },
+      "id": "cceb6df7-53b5-589f-9ae2-6f275f638951",
+      "name": "Log holiday skip",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8000/api/v1/market/fetch/MCX_GOLD",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "58addc25-5806-5e56-82e9-2eeca6a61bc8",
+      "name": "Fetch actual MCX close",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst q = $input.first().json;\nconst ageH = (Date.now() - Date.parse(q.as_of)) / 3.6e6;\nconst istDate = new Date(Date.now() + 5.5 * 3.6e6).toISOString().slice(0, 10);\nif (!(q.price > 0) || isNaN(ageH) || ageH > 2) {\n  return [{json: {ok: false, reason: 'MCX close missing/stale (age ' + ageH.toFixed(1) + 'h)'}}];\n}\nreturn [{json: {ok: true, trading_date: istDate, close: q.price, source: q.provider,\n                contract_key: q.contract_key || 'SPOT'}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "0e482b4d-f282-5724-b4d4-194b7ba9535f",
+      "name": "Check close is fresh",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      },
+      "id": "e91ab463-4cfb-5125-be23-334198d112fa",
+      "name": "Close usable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1820,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/market/actual",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({trading_date: $json.trading_date, instrument: 'MCX_GOLD', contract_key: $json.contract_key, close: $json.close, source: $json.source}) }}"
+      },
+      "id": "bb1e056f-adb0-5567-97a7-e0a8cce58adf",
+      "name": "Save actual close",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/predictions/evaluate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "757887a0-3096-5000-ae67-e6fa040399a2",
+      "name": "Evaluate forecasts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2340,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst r = $input.first().json;\nconst hdr = ['Target Date','Model Version','Predicted Price','Actual Close','Abs Error','% Error','Predicted Direction','Actual Direction','Direction Correct','Within Interval'];\nconst out = r.sheet_rows.map(a => { const o = {}; hdr.forEach((k, i) => o[k] = a[i]); return {json: o}; });\nreturn out;                                // empty => branch ends, nothing appended",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "ce97f32e-c2af-5111-bafe-e1c8192688f0",
+      "name": "Build sheet rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prediction Accuracy"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "8df8d137-a3ed-5459-be02-740fa6cb9c8a",
+      "name": "Append to Prediction Accuracy",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst saved = $input.first().json;\nif (!saved.inserted) return [];            // duplicate close: do not append a second sheet row\nconst c = $('Check close is fresh').first().json;\nreturn [{json: {'Trading Date': c.trading_date, 'Instrument': 'MCX_GOLD', 'Contract': c.contract_key,\n                'Close': c.close, 'Source': c.source}}];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "8d3671f5-9b67-5367-b212-4120fc470946",
+      "name": "Actual row (only if newly inserted)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Actual Prices"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "0a40cb80-c585-5eff-b172-2c8bd1e49b40",
+      "name": "Append to Actual Prices",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3380,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_ME",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://api:8000/api/v1/models/performance",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "df1796ad-dce3-5c02-a81e-b54535de15ab",
+      "name": "Fetch model performance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3640,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'INFO', event: 'evaluated', message: 'evaluation complete', payload: $json}) }}"
+      },
+      "id": "5260b053-959d-5e5e-be18-ad2b9303c287",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3900,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'WARNING', event: 'close_unavailable', message: $json.reason, payload: $json}) }}"
+      },
+      "id": "dff6901e-3c69-5c1d-9d33-05673fcaf316",
+      "name": "Log close unavailable",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4160,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'ERROR', event: 'fetch_failed', message: 'fetch failed: ' + ($json.error?.message || JSON.stringify($json.error || $json)), payload: $json}) }}"
+      },
+      "id": "96c4c796-f0b0-5b02-937c-d45fb35368be",
+      "name": "Log fetch failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4420,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'ERROR', event: 'api_failed', message: 'API failed: ' + JSON.stringify($json.error || $json), payload: $json}) }}"
+      },
+      "id": "58a51ce6-b235-5f93-8abc-608b07ac57ac",
+      "name": "Log API failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:8000/api/v1/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({workflow: 'accuracy_evaluation', level: 'ERROR', event: 'calendar_failed', message: 'calendar status call failed: ' + JSON.stringify($json.error || $json), payload: $json}) }}"
+      },
+      "id": "9c273e0c-86f9-5e1e-a714-81cca041ea41",
+      "name": "Log calendar failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4940,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "GoldPulse API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    }
+  ],
+  "connections": {
+    "Trigger 23:59 IST (after MCX close)": {
+      "main": [
+        [
+          {
+            "node": "Calendar status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar status": {
+      "main": [
+        [
+          {
+            "node": "Indian trading day?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log calendar failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Indian trading day?": {
+      "main": [
+        [
+          {
+            "node": "Fetch actual MCX close",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log holiday skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch actual MCX close": {
+      "main": [
+        [
+          {
+            "node": "Check close is fresh",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log fetch failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check close is fresh": {
+      "main": [
+        [
+          {
+            "node": "Close usable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close usable?": {
+      "main": [
+        [
+          {
+            "node": "Save actual close",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log close unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save actual close": {
+      "main": [
+        [
+          {
+            "node": "Actual row (only if newly inserted)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Evaluate forecasts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log API failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actual row (only if newly inserted)": {
+      "main": [
+        [
+          {
+            "node": "Append to Actual Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate forecasts": {
+      "main": [
+        [
+          {
+            "node": "Build sheet rows",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch model performance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log API failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build sheet rows": {
+      "main": [
+        [
+          {
+            "node": "Append to Prediction Accuracy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch model performance": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log API failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveManualExecutions": true,
+    "executionTimeout": 600
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

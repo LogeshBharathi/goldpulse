@@ -1,0 +1,17 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg2-binary>=2.9
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+xgboost>=2.1
+joblib>=1.4
+requests>=2.32
+openpyxl>=3.1
+pytest>=8.0
+yfinance>=0.2
+beautifulsoup4>=4.12
+lxml>=5.0
+pyyaml>=6.0

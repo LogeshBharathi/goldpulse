@@ -5,6 +5,23 @@
     "range_hit_rate": 0.8,
     "scored_days": 10
   },
+  "calc": {
+    "beta": 0.998794,
+    "board_today_1g": 11510,
+    "latest_intl_inr_per_g": 10521.5442,
+    "latest_price_time_ist": "2026-11-20T22:00:00+05:30",
+    "market_closed": false,
+    "model": "beta",
+    "move_pct": -0.3726,
+    "premium": null,
+    "range_hi": 11564,
+    "range_lo": 11370,
+    "range_method": "80% of recent misses, 10 days",
+    "raw_estimate": 11467.1604,
+    "reference_intl_inr_per_g": 10560.8988,
+    "reference_time_ist": "2026-11-20T09:00:00+05:30",
+    "rounded_estimate": 11467
+  },
   "champion": "beta",
   "today": {
     "date": "2026-11-20",
@@ -18,7 +35,7 @@
     "evening": null,
     "final": null
   },
-  "updated_at_ist": "2026-11-21T00:11:34+05:30",
+  "updated_at_ist": "2026-11-21T00:21:26+05:30",
   "yesterday_check": {
     "actual": 11510,
     "date": "2026-11-20",

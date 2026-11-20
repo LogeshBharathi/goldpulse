@@ -5,9 +5,9 @@ import sys
 from datetime import datetime, date
 
 from src.config import load_config, repo_path
-from src.forecast import board_history, champion_name
-from src.market import IST
-from src.models import units_from_1g
+from src.forecast import board_history, champion_name, change_pairs, past_abs_errors
+from src.market import IST, last_price, load_hourly, reference_time_on
+from src.models import beta_estimate, premium_estimate, range_around, units_from_1g
 from src.storage import read_csv, read_json, write_json
 
 
@@ -89,7 +89,56 @@ def history_series(forecasts: list[dict], boards: list[tuple[date, float]], cham
     return series
 
 
-def latest_payload(cfg: dict) -> tuple[dict, list]:
+def calculation(cfg: dict, boards, params: dict, champion: str, points, asof: datetime | None) -> dict | None:
+    """The champion estimate, spelled out so the page can show the arithmetic.
+
+    None when there is no board or no international price at the reference.
+    """
+    if not boards or not points:
+        return None
+    board_day, board_rate = boards[-1]
+    when = asof or datetime.now(IST)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=IST)
+    ref_time = reference_time_on(board_day, cfg)
+    ref = last_price(points, ref_time)
+    end = last_price(points, when)
+    if ref is None or end is None or ref[1] == 0:
+        return None
+    closed = end[0] <= ref[0]
+    move = 0.0 if closed else end[1] / ref[1] - 1
+    model = champion if champion in ("beta", "premium") else "beta"
+    beta = float(params.get("beta", cfg["ridge"]["prior"]))
+    premium = float(params.get("premium", 0.0))
+    raw = premium_estimate(end[1], premium) if model == "premium" else beta_estimate(board_rate, move, beta)
+    errors = past_abs_errors(cfg, model)
+    window = cfg["range"]["window_days"]
+    used = errors[-window:]
+    overnight = [pair[1] for pair in change_pairs(boards, points, cfg)]
+    lo, hi = range_around(raw, errors, cfg["range"],
+                          recent_moves=overnight[-cfg["range"]["volatility_recent_days"]:],
+                          baseline_moves=overnight)
+    coverage = int(round(cfg["range"]["coverage"] * 100))
+    return {
+        "reference_time_ist": ref_time.isoformat(timespec="seconds"),
+        "reference_intl_inr_per_g": round(ref[1], 4),
+        "latest_intl_inr_per_g": round(end[1], 4),
+        "latest_price_time_ist": end[0].astimezone(IST).isoformat(timespec="seconds"),
+        "move_pct": round(move * 100, 4),
+        "beta": None if model != "beta" else round(beta, 6),
+        "premium": None if model != "premium" else round(premium, 6),
+        "model": model,
+        "board_today_1g": units_from_1g(board_rate)["g1"],
+        "raw_estimate": round(raw, 4),
+        "rounded_estimate": units_from_1g(raw)["g1"],
+        "range_lo": units_from_1g(lo)["g1"],
+        "range_hi": units_from_1g(hi)["g1"],
+        "range_method": f"{coverage}% of recent misses, {len(used)} days",
+        "market_closed": closed,
+    }
+
+
+def latest_payload(cfg: dict, points=None) -> tuple[dict, list]:
     forecasts = read_csv(repo_path(cfg, "forecasts"))
     boards = board_history(cfg)
     params = read_json(repo_path(cfg, "params"), {})
@@ -136,6 +185,12 @@ def latest_payload(cfg: dict) -> tuple[dict, list]:
                      "estimate": int(float(chosen["estimate"])), "actual": int(round(float(chosen["actual"]))),
                      "error": round(float(chosen["error"]), 1)}
 
+    shown = final or evening
+    asof = None
+    if shown and shown.get("made_at_ist"):
+        asof = datetime.fromisoformat(shown["made_at_ist"])
+    if points is None:
+        points = load_hourly(cfg)
     payload = {
         "updated_at_ist": datetime.now(IST).isoformat(timespec="seconds"),
         "champion": champion,
@@ -143,13 +198,14 @@ def latest_payload(cfg: dict) -> tuple[dict, list]:
         "tomorrow": {"evening": evening, "final": final},
         "yesterday_check": check,
         "accuracy": accuracy(forecasts, champion, cfg["range"]["window_days"]),
+        "calc": calculation(cfg, boards, params, champion, points, asof),
     }
     return payload, history_series(forecasts, boards, champion)
 
 
-def run(cfg: dict | None = None) -> dict:
+def run(cfg: dict | None = None, points=None) -> dict:
     cfg = cfg or load_config()
-    payload, series = latest_payload(cfg)
+    payload, series = latest_payload(cfg, points)
     write_json(repo_path(cfg, "latest"), payload)
     write_json(repo_path(cfg, "history"), series)
     print(f"wrote {repo_path(cfg, 'latest')} and {repo_path(cfg, 'history')}")

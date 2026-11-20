@@ -2,7 +2,35 @@
 
 GoldPulse estimates the next Tamil Nadu 22 karat gold board rate (1 gram, before GST) and publishes it as a static page. GitHub Actions runs the jobs. GitHub Pages serves `docs/`. There is no server and no paid service. All times are Asia/Kolkata.
 
-The estimate starts from today's board and moves it by part of the change in international gold, priced in rupees, since 09:00 IST. A second model applies the usual local premium to the latest international price. The model with the lower error over the last 20 scored days is the champion. Until that history exists, the beta model is used. The range is a split-conformal interval from past misses, widened when recent overnight moves have been large, and never narrower than the minimum in `config.yaml`.
+The estimate starts from today's board and moves it by part of the change in international gold, priced in rupees, since 09:00 IST. A second model applies the usual local premium to the latest international price. The model with the lower error over the last 20 scored days is the champion. Until that history exists, the beta model is used. The range is a split-conformal interval from past misses, widened when recent overnight moves have been large. With no scored misses yet, it uses the minimum width in `config.yaml`.
+
+## Where the numbers come from
+
+The page links to each feed. All of them are unofficial and delayed.
+
+| Source | Used for | Address |
+|---|---|---|
+| BankBazaar Chennai | Primary Tamil Nadu 22K board, 1 gram before GST | https://www.bankbazaar.com/gold-rate-chennai.html |
+| GoodReturns Chennai | Fallback and cross-check | https://www.goodreturns.in/gold-rates/chennai.html |
+| Yahoo Finance GC=F | COMEX gold futures, USD per troy ounce | https://finance.yahoo.com/quote/GC=F |
+| Yahoo Finance INR=X | USD/INR | https://finance.yahoo.com/quote/INR=X |
+
+International gold in rupees per gram is GC=F × INR=X ÷ 31.1034768. The saved board names its source. A value typed into `data/manual_board.json` is shown as entered manually.
+
+## How the estimate is calculated
+
+`docs/latest.json` carries a `calc` object for the champion model. The page fills these steps with those numbers, and shows the formulas alone when `calc` is null.
+
+1. Start from today's 1 gram board.
+2. Convert COMEX gold to rupees per gram with the dollar-rupee rate. One troy ounce is 31.1035 grams.
+3. The reference is that value at 09:00 IST on the board's day.
+4. The latest value is the last traded price at or before the estimate. The move is latest / reference − 1.
+5. Beta: board × (1 + beta × move). Premium, when it is the champion: latest international value × (1 + average local premium).
+6. Round to a whole rupee, then multiply by 8, 10 and 100.
+7. The range is the band that held 80% of recent misses. It is a rough band, not a guarantee.
+8. If nothing has traded since the reference, the move is 0 and the board repeats. That is what happens on Sunday.
+
+The same section lists the limits: moves after the estimate are invisible, the history is short, the local premium drifts, and a board can be revised during the day.
 
 ## Setup
 

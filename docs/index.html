@@ -7,7 +7,7 @@
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; font: 17px/1.45 system-ui, sans-serif; background: #12140f; color: #f4f0e6; }
-  main { max-width: 560px; margin: 0 auto; padding: 28px 18px 64px; }
+  main { max-width: 560px; margin: 0 auto; padding: 28px 18px 64px; overflow-wrap: anywhere; }
   h1 { font-size: 1.15rem; margin: 0 0 6px; }
   .muted, .sub { color: #b7b1a4; }
   .price { font-size: 3rem; font-weight: 720; letter-spacing: -0.04em; margin: 4px 0 0; }
@@ -19,9 +19,14 @@
   button.on { background: #e4c36a; color: #12140f; font-weight: 650; }
   .card { background: #1c1e18; border-radius: 14px; padding: 4px 16px; margin: 8px 0 16px; }
   .row { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #2a2c25; }
+  .row > span { min-width: 0; flex: 1; }
   .row:last-child { border-bottom: 0; }
-  .row strong { white-space: nowrap; }
+  .row strong { text-align: right; }
   .sub { display: block; font-size: 0.88rem; }
+  a { color: #e4c36a; overflow-wrap: anywhere; }
+  ol, ul { margin: 8px 0 0; padding-left: 1.25rem; }
+  li { margin: 8px 0; }
+  .note { color: #b7b1a4; }
   svg { width: 100%; height: 180px; background: #1c1e18; border-radius: 14px; }
   .legend { display: flex; gap: 16px; font-size: 0.9rem; color: #b7b1a4; margin: 6px 0 16px; }
   .swatch { display: inline-block; width: 12px; height: 3px; margin-right: 6px; vertical-align: middle; }
@@ -36,6 +41,7 @@
   <p class="muted" id="updated">Loading…</p>
   <p class="label">Today’s Tamil Nadu board · 22 karat</p>
   <p class="price" id="board">—</p>
+  <p class="muted" id="board-source"></p>
   <div class="units" id="units"></div>
   <p class="label" id="next-label">Tomorrow’s estimate</p>
   <p class="price" id="estimate">—</p>
@@ -47,9 +53,17 @@
   <svg id="chart" viewBox="0 0 320 180" role="img" aria-label="Board rate and estimate"></svg>
   <p class="legend"><span><i class="swatch" style="background:#f4f0e6"></i>Board</span><span><i class="swatch" style="background:#e4c36a"></i>Estimate</span></p>
   <div class="card" id="stats"></div>
-  <details open>
-    <summary>Known limits</summary>
-    <p>The estimate cannot see moves that happen after it is made, and overnight moves are the usual reason it misses. The history it learns from is still short, and so far it is mostly falling days. Rates come from public pages, not an official exchange feed. GST and making charges are extra. This is an estimate, not a promise.</p>
+  <p class="label">Where the data comes from</p>
+  <div class="card" id="sources">
+    <div class="row"><span>BankBazaar Chennai gold rate<span class="sub">Primary Tamil Nadu 22K 1 gram board rate</span><a href="https://www.bankbazaar.com/gold-rate-chennai.html" target="_blank" rel="noopener noreferrer">bankbazaar.com/gold-rate-chennai.html</a></span></div>
+    <div class="row"><span>GoodReturns Chennai gold rate<span class="sub">Fallback and cross-check</span><a href="https://www.goodreturns.in/gold-rates/chennai.html" target="_blank" rel="noopener noreferrer">goodreturns.in/gold-rates/chennai.html</a></span></div>
+    <div class="row"><span>Yahoo Finance COMEX gold futures (GC=F)<span class="sub">International gold price in USD per troy ounce</span><a href="https://finance.yahoo.com/quote/GC=F" target="_blank" rel="noopener noreferrer">finance.yahoo.com/quote/GC=F</a></span></div>
+    <div class="row"><span>Yahoo Finance USD/INR (INR=X)<span class="sub">The dollar-rupee rate</span><a href="https://finance.yahoo.com/quote/INR=X" target="_blank" rel="noopener noreferrer">finance.yahoo.com/quote/INR=X</a></span></div>
+  </div>
+  <p class="note">Unofficial, delayed public feeds. Not financial advice. Check your jeweller's board before buying or selling.</p>
+  <details>
+    <summary>How this estimate is calculated</summary>
+    <ol id="calc-steps"></ol>
   </details>
 </main>
 <script>
@@ -64,6 +78,7 @@ let latest = null;
 let history = [];
 
 const inr = n => "₹" + Math.round(n).toLocaleString("en-IN");
+const inr2 = n => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const text = (id, value) => { document.getElementById(id).textContent = value; };
 
 function chosen() { return latest && latest.tomorrow && (latest.tomorrow.final || latest.tomorrow.evening); }
@@ -107,6 +122,81 @@ function render() {
   ].map(r => `<div class="row"><span>${r[0]}</span><strong>${r[1]}</strong></div>`).join("")
     : `<div class="row"><span>Accuracy shows after a few scored days</span></div>`;
   draw();
+  explain();
+}
+
+function sourceName(src) {
+  if (src === "manual" || src === "you") return "entered manually";
+  return src || "not recorded";
+}
+
+function stamp(iso) {
+  if (!iso) return "";
+  const [day, clock] = iso.split("T");
+  const [year, month, date] = day.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return Number(date) + " " + months[Number(month) - 1] + " " + year + ", " + clock.slice(0, 5) + " IST";
+}
+
+const FORMULAS = [
+  "Start from today's board, in rupees per gram, and name the source and the date.",
+  "International gold in rupees = COMEX GC=F price × USD/INR, converted to rupees per gram. 1 troy ounce = 31.1035 g.",
+  "The reference point is that rupee value at 09:00 IST on the board's day.",
+  "The latest value is the last traded price at or before the estimate. Move = latest / reference − 1.",
+  "Beta model: estimate = board × (1 + beta × move). Premium model, when it is the champion: estimate = latest international value × (1 + average local premium).",
+  "Round to a whole rupee per gram. A pavun is 8 times that rate, 10 grams is 10 times, and 100 grams is 100 times.",
+  "The range comes from how far the same method missed on recent days. 80% of those misses fell inside the band. This is a rough band, not a guarantee.",
+  "If the market has been closed since the reference, for example on Sunday, the move is 0 and the board repeats."
+];
+
+const LIMITS = [
+  "Price moves between the estimate time and the board time are invisible.",
+  "The history is still short.",
+  "The local premium over international gold drifts.",
+  "The board may be revised during the day."
+];
+
+function explain() {
+  const steps = document.getElementById("calc-steps");
+  const today = latest && latest.today;
+  text("board-source", today
+    ? "Board rate for " + today.date + " taken from: " + sourceName(today.source)
+    : "");
+  const c = latest && latest.calc;
+  const limits = "<li><strong>Known limits.</strong><ul>" + LIMITS.map(item => "<li>" + item + "</li>").join("") + "</ul></li>";
+  if (!c) {
+    steps.innerHTML = FORMULAS.map(item => "<li>" + item + "</li>").join("") + limits;
+    return;
+  }
+  const betaLine = "Beta model: estimate = " + inr(c.board_today_1g) + " × (1 + " + c.beta
+    + " × " + c.move_pct.toFixed(4) + "%) = " + inr2(c.raw_estimate)
+    + ", which rounds to " + inr(c.rounded_estimate) + ".";
+  const premiumLine = "Premium model: estimate = " + inr2(c.latest_intl_inr_per_g) + " × (1 + "
+    + (c.premium * 100).toFixed(2) + "% local premium) = " + inr2(c.raw_estimate)
+    + ", which rounds to " + inr(c.rounded_estimate) + ".";
+  const half = Math.round((c.range_hi - c.range_lo) / 2);
+  const closed = c.market_closed
+    ? "The market has not printed since the reference, so the move is 0 and the estimate repeats the board."
+    : "The market has printed since the reference, so the move is not forced to zero. On a day with no new price, such as Sunday, the move is 0 and the board repeats.";
+  const filled = [
+    "Start from today's board: " + inr(c.board_today_1g) + " per gram ("
+      + sourceName(today && today.source) + ", " + (today ? today.date : "") + ").",
+    "International gold in rupees = COMEX GC=F price × USD/INR, converted to rupees per gram. 1 troy ounce = 31.1035 g. That series is what the rupee prices below come from.",
+    "Reference point = that value at 09:00 IST on the board's day: " + inr2(c.reference_intl_inr_per_g)
+      + " at " + stamp(c.reference_time_ist) + ".",
+    "Latest value = " + inr2(c.latest_intl_inr_per_g) + " at " + stamp(c.latest_price_time_ist)
+      + ". Move = " + c.latest_intl_inr_per_g + " / " + c.reference_intl_inr_per_g + " − 1 = "
+      + c.move_pct.toFixed(4) + "%.",
+    c.model === "premium" ? premiumLine : betaLine,
+    "Round to whole rupees per gram: " + inr(c.rounded_estimate) + ". Then multiply: pavun "
+      + inr(c.rounded_estimate * 8) + " (8 g), 10 g " + inr(c.rounded_estimate * 10)
+      + ", 100 g " + inr(c.rounded_estimate * 100) + ".",
+    "Range: " + c.range_method + ". 80% of those misses fell within ±" + inr(half)
+      + ", so the band is " + inr(c.range_lo) + " to " + inr(c.range_hi)
+      + ". This is a rough band, not a guarantee.",
+    closed
+  ];
+  steps.innerHTML = filled.map(item => "<li>" + item + "</li>").join("") + limits;
 }
 
 function draw() {

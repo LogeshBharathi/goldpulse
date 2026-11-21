@@ -1,9 +1,10 @@
 """Today's Tamil Nadu 22K board, rupees per gram, before GST.
 
-BankBazaar's Chennai page is read first. GoodReturns is the fallback. A date in
-data/manual_board.json wins only when both pages fail validation. A rate more
-than 5% from the previous saved board is rejected, logged, and not saved, so it
-can never be learned from. Two sources more than 0.5% apart are flagged.
+BankBazaar's Chennai page is read first. GoodReturns Chennai is the fallback,
+then GoodReturns Dindigul. A date in data/manual_board.json wins only when every
+page fails validation. A rate more than 5% from the previous saved board is
+rejected, logged, and not saved, so it can never be learned from. Sources more
+than 0.5% apart are flagged.
 """
 from __future__ import annotations
 
@@ -129,13 +130,13 @@ def select_rate(candidates: list[tuple[str, float | None]], previous: float | No
     if not valid:
         raise ValueError("no valid Tamil Nadu board rate")
     flags = []
-    if len(valid) >= 2:
-        first, second = valid[0][1], valid[1][1]
-        gap = abs(first / second - 1) * 100
+    chosen_name, chosen_rate = valid[0]
+    for other_name, other_rate in valid[1:]:
+        gap = abs(chosen_rate / other_rate - 1) * 100
         if gap > cfg["validation"]["source_disagreement_pct"]:
-            flags.append(f"sources differ by {gap:.2f}% ({valid[0][0]} {first:.0f}, {valid[1][0]} {second:.0f})")
-            _log("flag: " + flags[0])
-    return valid[0][0], valid[0][1], flags
+            flags.append(f"sources differ by {gap:.2f}% ({chosen_name} {chosen_rate:.0f}, {other_name} {other_rate:.0f})")
+            _log("flag: " + flags[-1])
+    return chosen_name, chosen_rate, flags
 
 
 def _get(url: str, cfg: dict) -> tuple[int | None, str]:
@@ -213,12 +214,15 @@ def collect(cfg: dict, day, fetch=None) -> tuple[str, float, list[str]]:
     manual_rate = manual.get(day.isoformat())
     bank_url = cfg["sources"]["bankbazaar_url"]
     good_url = cfg["sources"]["goodreturns_url"]
+    dindigul_url = cfg["sources"]["goodreturns_dindigul_url"]
     bank = _read_source("BankBazaar", bank_url, parse_bankbazaar, day, cfg, fetch)
-    good = _read_source("GoodReturns", good_url, parse_goodreturns, day, cfg, fetch)
-    if bank is None and good is None:
-        _log("FAILED: BankBazaar and GoodReturns both failed. No website rate will be saved. "
-             "See the two FAILED lines above for the HTTP status and the start of each response.")
-    candidates = [("bankbazaar", bank), ("goodreturns", good),
+    good = _read_source("GoodReturns Chennai", good_url, parse_goodreturns, day, cfg, fetch)
+    dindigul = _read_source("GoodReturns Dindigul", dindigul_url, parse_goodreturns, day, cfg, fetch)
+    if bank is None and good is None and dindigul is None:
+        _log("FAILED: BankBazaar, GoodReturns Chennai, and GoodReturns Dindigul all failed. "
+             "No website rate will be saved. See the FAILED lines above for the HTTP status "
+             "and the start of each response.")
+    candidates = [("bankbazaar", bank), ("goodreturns", good), ("goodreturns-dindigul", dindigul),
                   ("manual", float(manual_rate) if manual_rate not in (None, "") else None)]
     return select_rate(candidates, previous, cfg)
 

@@ -12,6 +12,7 @@ The page links to each feed. All of them are unofficial and delayed.
 |---|---|---|
 | BankBazaar Chennai | Primary Tamil Nadu 22K board, 1 gram before GST | https://www.bankbazaar.com/gold-rate-chennai.html |
 | GoodReturns Chennai | Fallback and cross-check | https://www.goodreturns.in/gold-rates/chennai.html |
+| GoodReturns Dindigul | Second Tamil Nadu cross-check | https://www.goodreturns.in/gold-rates/dindigul.html |
 | Yahoo Finance GC=F | COMEX gold futures, USD per troy ounce | https://finance.yahoo.com/quote/GC=F |
 | Yahoo Finance INR=X | USD/INR | https://finance.yahoo.com/quote/INR=X |
 
@@ -61,7 +62,7 @@ Put the date and the 1 gram 22K rate, before GST, in `data/manual_board.json`:
 {"2026-11-20": 11510}
 ```
 
-The manual value is used only when BankBazaar and GoodReturns are missing or fail the checks. A rate more than 5% away from the previous saved board is rejected and is not learned from. If the two websites differ by more than 0.5%, the chosen rate is kept and the difference is logged.
+The manual value is used only when BankBazaar, GoodReturns Chennai, and GoodReturns Dindigul are missing or fail the checks. A rate more than 5% away from the previous saved board is rejected and is not learned from. If the websites differ by more than 0.5%, the chosen rate is kept and the difference is logged.
 
 ## Backfill
 

@@ -3,6 +3,7 @@ timezone: Asia/Kolkata
 sources:
   bankbazaar_url: https://www.bankbazaar.com/gold-rate-chennai.html
   goodreturns_url: https://www.goodreturns.in/gold-rates/chennai.html
+  goodreturns_dindigul_url: https://www.goodreturns.in/gold-rates/dindigul.html
   manual_file: data/manual_board.json
   timeout_seconds: 20
   retries: 3

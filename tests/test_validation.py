@@ -40,6 +40,27 @@ def test_jump_is_rejected_and_disagreement_is_flagged():
     assert flags and "differ" in flags[0]
 
 
+def test_dindigul_is_used_when_chennai_pages_fail(tmp_path):
+    cfg = load_config()
+    cfg["_root"] = str(tmp_path)
+    cfg["paths"] = {**cfg["paths"], "board": "board.csv"}
+    cfg["sources"] = {**cfg["sources"], "manual_file": "manual_board.json"}
+    (tmp_path / "board.csv").write_text(
+        "date,source,rate_22k_1g,scraped_at_ist\n"
+        "2026-11-20,legacy,11510.00,2026-11-20T10:24:41+05:30\n"
+    )
+    (tmp_path / "manual_board.json").write_text("{}\n")
+    day = datetime(2026, 11, 21).date()
+
+    def fetch(url):
+        if "dindigul" in url:
+            return 200, GOOD
+        return 503, "<html>unavailable</html>"
+
+    source, rate, flags = collect(cfg, day, fetch=fetch)
+    assert (source, rate, flags) == ("goodreturns-dindigul", 11510.0, [])
+
+
 def test_manual_file_is_saved_when_both_sites_fail(tmp_path):
     cfg = load_config()
     cfg["_root"] = str(tmp_path)

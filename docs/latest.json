@@ -6,10 +6,10 @@
     "scored_days": 10
   },
   "calc": {
-    "beta": 0.998106,
+    "beta": 0.998189,
     "board_today_1g": 11600,
-    "latest_intl_inr_per_g": 10909.9003,
-    "latest_price_time_ist": "2026-11-23T23:00:00+05:30",
+    "latest_intl_inr_per_g": 10865.3972,
+    "latest_price_time_ist": "2026-11-24T01:00:00+05:30",
     "market_closed": true,
     "model": "beta",
     "move_pct": 0.0,
@@ -18,7 +18,7 @@
     "range_lo": 11494,
     "range_method": "80% of recent misses, 10 days",
     "raw_estimate": 11600.0,
-    "reference_intl_inr_per_g": 10909.9003,
+    "reference_intl_inr_per_g": 10865.3972,
     "reference_time_ist": "2026-11-24T09:00:00+05:30",
     "rounded_estimate": 11600
   },
@@ -35,6 +35,6 @@
     "evening": null,
     "final": null
   },
-  "updated_at_ist": "2026-11-24T00:06:54+05:30",
+  "updated_at_ist": "2026-11-24T01:58:22+05:30",
   "yesterday_check": null
 }

@@ -6,35 +6,35 @@
     "scored_days": 10
   },
   "calc": {
-    "beta": 0.997322,
-    "board_today_1g": 11715,
+    "beta": 0.99745,
+    "board_today_1g": 11420,
     "latest_intl_inr_per_g": 10376.7038,
     "latest_price_time_ist": "2026-11-25T19:00:00+05:30",
-    "market_closed": false,
+    "market_closed": true,
     "model": "beta",
-    "move_pct": -1.8095,
+    "move_pct": 0.0,
     "premium": null,
-    "range_hi": 11614,
-    "range_lo": 11393,
+    "range_hi": 11535,
+    "range_lo": 11305,
     "range_method": "80% of recent misses, 10 days",
-    "raw_estimate": 11503.5803,
-    "reference_intl_inr_per_g": 10567.9346,
-    "reference_time_ist": "2026-11-25T09:00:00+05:30",
-    "rounded_estimate": 11504
+    "raw_estimate": 11420.0,
+    "reference_intl_inr_per_g": 10376.7038,
+    "reference_time_ist": "2026-11-26T09:00:00+05:30",
+    "rounded_estimate": 11420
   },
   "champion": "beta",
   "today": {
-    "date": "2026-11-25",
-    "g1": 11715,
-    "g10": 117150,
-    "g100": 1171500,
-    "pavun": 93720,
+    "date": "2026-11-26",
+    "g1": 11420,
+    "g10": 114200,
+    "g100": 1142000,
+    "pavun": 91360,
     "source": "goodreturns"
   },
   "tomorrow": {
     "evening": null,
     "final": null
   },
-  "updated_at_ist": "2026-11-25T23:00:09+05:30",
+  "updated_at_ist": "2026-11-26T00:17:07+05:30",
   "yesterday_check": null
 }
